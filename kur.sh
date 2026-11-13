@@ -25,18 +25,18 @@
 # kesilirse hiçbir şey çalışmaz. macOS'un bash 3.2'siyle çalışır.
 
 # --- yayın: scripts/release.sh doldurur / filled in by scripts/release.sh ---
-OCAK_VERSION="0.1.0"
+OCAK_VERSION="0.1.1"
 OCAK_REPO="umirza00/ocak-kurulum"
-OCAK_BASE="https://github.com/umirza00/ocak-kurulum/releases/download/v0.1.0"
+OCAK_BASE="https://github.com/umirza00/ocak-kurulum/releases/download/v0.1.1"
 OCAK_SUMS="
-41d06d0d7b9f8ed912981b6c2eb48e61f08f44448e941722e48a5bac365ec11d  ocak-kur-darwin-amd64
-d7cf23ab63e286fef08e26e9cd4f88d0e78cb8770918161f0bf31f71d2189993  ocak-kur-darwin-arm64
-1d6d7b1a8e4e34751b8036d2d05f1ccd7e45b1efe796a71ea1e5a757b4871819  ocak-kur-linux-amd64
-6566cb2f9809fb55326e92771a4429d8a24218eb2a7c53d12df3651594764200  ocak-kur-linux-arm64
-62b022ed725a6d4b94dbce8505b5bf5b4c331a661a840b0083f6787bf320442f  ocak-kutu-darwin-amd64
-f388ece3fe93125b7e6577c5313c43ac4c77d2989b4bdf1b0ca9d19ec179c2ee  ocak-kutu-darwin-arm64
-98a11f0afab76ee8c6101cef687183a78e66e8439667fb71976153ca230e5d32  ocak-kutu-linux-amd64
-767293a1b987ed077313577f06010f43c0226676b81e54174f75fffc91e441ff  ocak-kutu-linux-arm64
+267db99aa26c3bfc587410a422a9065060b2b6b988396dfe170266c57dfb184b  ocak-kur-darwin-amd64
+27f4710ccd8ebe0b937b4f95b0607b67937c0c31cbd5db5605113701e43193cd  ocak-kur-darwin-arm64
+ff0ae3b0c8bf94036149ab810f4b9863b332747774759fd915312a918105d6dd  ocak-kur-linux-amd64
+fee83ca5555d6a923a6513a5f8eb4d09cf35c86d042b25e2f0b2c6731dae9c82  ocak-kur-linux-arm64
+9239abdcf415e5381037b2e83ac2c87ed018fe7a563c5e3fc713b8fa7bd7d0cf  ocak-kutu-darwin-amd64
+caf491cc3f7e2871f7ad5049db9893650232ec6d822ac4ae792c2a0ec39b8ec4  ocak-kutu-darwin-arm64
+075476f3f7c907194af81a40ed2c8c1505a6e7c572f52351f76c2071e18142f9  ocak-kutu-linux-amd64
+b3123d9202216c472f04717c4d5675ab63a9fcd3c12dcf28c6e21499aab21767  ocak-kutu-linux-arm64
 "
 # --- yayın sonu ---
 
@@ -215,23 +215,36 @@ apt_pick() {
 
 linux_packages() {
 	step "Sistem paketleri / System packages" "Şifreli veri diski (cryptsetup, ext4), diskler (util-linux), TPM kütüphaneleri (tpm2-tss), sertifikalar."
-	local pkgs="" p
+	local pkgs="" p extra="ca-certificates"
+	# curl only when missing: RHEL-like systems ship curl-minimal, which
+	# conflicts with the curl package.
+	have curl || extra="$extra curl"
 	if have apt-get; then
 		export DEBIAN_FRONTEND=noninteractive
 		apt-get update -qq || warn "apt-get update başarısız; var olan listeyle devam ediliyor"
 		for p in cryptsetup e2fsprogs util-linux tpm2-tools \
-			"libtss2-tcti-device0t64|libtss2-tcti-device0" ca-certificates curl; do
+			"libtss2-tcti-device0t64|libtss2-tcti-device0" $extra; do
 			p="$(apt_pick "$p")"
 			[ -n "$p" ] && pkgs="$pkgs $p"
 		done
 		# shellcheck disable=SC2086
 		apt-get install -y -qq --no-install-recommends $pkgs >/dev/null || die "Paketler kurulamadı:$pkgs"
 	elif have dnf; then
-		dnf install -y -q cryptsetup e2fsprogs util-linux tpm2-tss ca-certificates curl >/dev/null || die "Paketler kurulamadı (dnf)."
+		# shellcheck disable=SC2086
+		dnf install -y -q cryptsetup e2fsprogs util-linux tpm2-tss $extra >/dev/null || die "Paketler kurulamadı (dnf)."
 	elif have pacman; then
-		pacman -Sy --noconfirm --needed cryptsetup e2fsprogs util-linux tpm2-tss ca-certificates curl >/dev/null || die "Paketler kurulamadı (pacman)."
+		# Arch: never a partial upgrade (-Sy without -u breaks the system).
+		# shellcheck disable=SC2086
+		# Again without the download sandbox if it cannot start (limited seccomp).
+		# shellcheck disable=SC2086
+		pacman -Syu --noconfirm --needed cryptsetup e2fsprogs util-linux tpm2-tss $extra >/dev/null 2>&1 ||
+			pacman -Syu --noconfirm --needed --disable-sandbox cryptsetup e2fsprogs util-linux tpm2-tss $extra >/dev/null ||
+			die "Paketler kurulamadı (pacman)."
 	elif have zypper; then
-		zypper --non-interactive install cryptsetup e2fsprogs util-linux tpm2-0-tss ca-certificates curl >/dev/null ||
+		# lsblk is in util-linux-systemd; the TPM libraries are separate packages.
+		# shellcheck disable=SC2086
+		zypper --non-interactive install cryptsetup e2fsprogs util-linux util-linux-systemd \
+			libtss2-esys0 libtss2-mu0 libtss2-rc0 libtss2-tctildr0 libtss2-tcti-device0 $extra >/dev/null ||
 			warn "bazı paketler kurulamadı (zypper); sistem kontrolü eksikleri söyler"
 	else
 		die "Bu dağıtımın paket yöneticisi tanınmıyor ($OS_NAME)." "Elle kurun: cryptsetup, e2fsprogs, util-linux, tpm2-tss; sonra yeniden çalıştırın."
